@@ -1,5 +1,7 @@
 module DynamicMixtures
 
-greet() = print("Hello World!")
+using Distributions
+
+include("dirichlet.jl")
 
 end # module
