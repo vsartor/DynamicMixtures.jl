@@ -177,3 +177,69 @@ function initialize(model::Union{DynamicMixture, StaticMixture},
 
     return θ, ϕ, η
 end
+
+
+"""
+    dynamic_mixture(Y, F_specs, G_specs, δ[; numit, mnumit, ϵ, M])
+
+Uses Stochastic Expectation Maximization to obtain MAP estimates for the Dynamic
+Mixture of Dynamic Linear Models.
+
+* `Y` is the matrix of observations with `T` rows and `n * nreps` columns;
+* `F_specs` is a vector of observational matrices;
+* `G_specs` is a vector of evolutional matrices;
+* `δ` is the vector of discount factors for each observational unit;
+* `numit` is the number of iterations;
+* `M` is the number of simulations in the stochastic step of the Stochastic Expectation Maximization.
+
+Returns the estimated `η`, `θ`, `ϕ` and the implied `W`.
+"""
+function dynamic_mixture(Y::Matrix{RT},
+                         F_specs::Vector{Matrix{RT}},
+                         G_specs::Vector{Matrix{RT}},
+                         δ::Vector{RT};
+                         numit::Int = 10,
+                         M::Int = 200) where RT <: Real
+
+    _, nobs, _, T, k, _ = check_dimensions(Y, F_specs, G_specs)
+
+    θ, ϕ, η = initialize(DynamicMixture(), Y, F_specs, G_specs)
+
+    c₀ = ones(k)
+
+    mc_observations = Matrix{Int}(undef, T, k)
+    mc_estimates = Matrix{RT}(undef, T, k)
+
+    for _ = 1:numit
+        # Step 1: Expectation-step
+
+        weights = compute_weights(DynamicMixture(), Y, F_specs, G_specs, θ, ϕ, η)
+
+        # Step 2: Maximize weights for each observation
+
+        for i = 1:nobs
+            # Simulate M observations and obtain the mean of all M estimates
+            fill!(mc_estimates, 0.)
+            for _ = 1:M
+                for t = 1:T
+                    mc_observations[t,:] = rand(Multinomial(1, η[t,i,:]))
+                end
+                c = forward_filter(mc_observations, δ[i], c₀)
+                mc_estimates += backwards_estimator(c, δ[i]) / M
+            end
+            η[:,i,:] = mc_estimates
+        end
+
+        # Step 3: Maximize the cluster parameters
+
+        for j = 1:k
+            θ[j], V = estimate(Y, F_specs[j], G_specs[j], η[:,:,j], 0.7)
+            ϕ[j] = 1 ./ diag(V)
+        end
+
+    end
+
+    W = [evolutional_covariances(Y, F_specs[j], G_specs[j], Symmetric(diagm(1 ./ ϕ[j])), η[:,:,j], 0.7) for j = 1:k]
+
+    return η, θ, ϕ, W
+end

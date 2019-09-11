@@ -1,6 +1,6 @@
 module DynamicMixtures
 
-using Distributions: Beta, Dirichlet, MultivariateNormal, pdf
+using Distributions: Beta, Dirichlet, Multinomial, MultivariateNormal, pdf
 using DynamicLinearModels
 using LinearAlgebra
 using StatsBase
