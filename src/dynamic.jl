@@ -168,9 +168,7 @@ function initialize(model::Union{DynamicMixture, StaticMixture},
     # centroids and pick the highest likelihood candidate for each model.
 
     for j = 1:k
-        obs = [Y[t,index_map[centroids[j]]] for t = 1:T]
-        θ_est = estimate(obs, F_specs[j], G_specs[j], 0.7)[1]
-        θ[j] = collect(hcat(θ_est...)')
+        θ[j] = estimate(Y[:,index_map[centroids[j]]], F_specs[j], G_specs[j], 0.7)[1]
     end
 
     # Step 5: Compute weights
