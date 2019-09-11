@@ -11,7 +11,7 @@
         F = [ones(Float64, real_n, real_p[j]) for j = 1:real_k]
         G = [ones(Float64, real_p[j], real_p[j]) for j = 1:real_k]
 
-        k, n, p, nreps, T, index_map = DynamicMixtures.check_dimensions(Y, F, G)
+        n, nreps, p, T, k, index_map = DynamicMixtures.check_dimensions(Y, F, G)
 
         @test k == real_k
         @test n == real_n

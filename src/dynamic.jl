@@ -3,9 +3,17 @@
 """
     DynamicMixture
 
-Dummy struct indicating a Dynamic Mixture Model.
+Dummy struct indicating a Dynamic Mixture Model for Time-Series data.
 """
 struct DynamicMixture end
+
+
+"""
+    StaticMixture
+
+Dummy struct indicating a Static Mixture Model for Time-Series data.
+"""
+struct StaticMixture end
 
 
 """
@@ -13,10 +21,10 @@ struct DynamicMixture end
 
 Internal function for checking the problem dimensions and returning them.
 
-Returns number of clusters `k`, observational dimension `n`, state dimensions
-`p = [p[1], …, p[k]]`, number of replicates `nreps`, time window length `T`,
+Returns observational dimension `n`, number of replicates `nreps`, state
+dimensions `p = [p[1], …, p[k]]`, time-window size `T`, number of clusters `k`,
 and a vector mapping the `i`-th observation to its indexes in `Y`, in the form
-of `UnitRange`'s.
+of `UnitRange`'s. Returning a tuple `n, nreps, p, T, k, index_map`.
 """
 function check_dimensions(Y::Matrix{RT},
                           F_specs::Vector{Matrix{RT}},
@@ -65,7 +73,7 @@ function check_dimensions(Y::Matrix{RT},
     # Index mapping
     index_map = [(n * (l - 1) + 1):(n * (l - 1) + n) for l = 1:nreps]
 
-    return k, n, p, nreps, T, index_map
+    return n, nreps, p, T, k, index_map
 end
 
 
@@ -83,7 +91,7 @@ function compute_weights(::DynamicMixture,
                          ϕ::Vector{Vector{RT}},
                          η::Union{Array{RT,3}, Nothing} = nothing) where RT <: Real
 
-    k, _, _, nreps, T, index_map = check_dimensions(Y, F_specs, G_specs)
+    _, nreps, _, T, k, index_map = check_dimensions(Y, F_specs, G_specs)
 
     if isnothing(η)
         η = ones(RT, T, nreps, k)
@@ -107,4 +115,67 @@ function compute_weights(::DynamicMixture,
     end
 
     return γ
+end
+
+
+"""
+    initialize(::DynamicMixture, Y, F_specs, G_specs)
+
+Initializes the model parameters `θ`, `ϕ`, and `η`. Note that to avoid problems
+regarding bad relative scales of observational variances, the `ϕ` are
+initialized to `ones`.
+"""
+function initialize(model::Union{DynamicMixture, StaticMixture},
+                    Y::Matrix{RT},
+                    F_specs::Vector{Matrix{RT}},
+                    G_specs::Vector{Matrix{RT}}) where RT <: Real
+
+    n, nreps, p, T, k, index_map = check_dimensions(Y, F_specs, G_specs)
+
+    ϕ = [ones(n) for _ = 1:k]
+    θ = Vector{Matrix{RT}}(undef, k)
+
+    # Step 1: Initialize algorithm-specific variables
+    centroids = Vector{Int}(undef, 0)
+    candidates = collect(1:nreps)
+    distances = Matrix{RT}(undef, nreps, 0)
+
+    # Step 2: Pick the first centroid uniformly at random
+    push!(centroids, sample(candidates))
+
+    # Step 3: Pick further centroids based on distance
+    for _ = 2:k
+        # Remove last picked centroid from candidates
+        deleteat!(candidates, findfirst(x -> x == centroids[end], candidates))
+
+        # Add to `distances` the distance between every observation and the last
+        # picked centroid
+        recent_centroid = Y[:,index_map[centroids[end]]]
+        local_distances = [sum(abs.(Y[:,index_map[i]] - recent_centroid))  for i = 1:nreps]
+        distances = hcat(distances, local_distances)
+
+        # Get each candidate's biggest distance to the centroids
+        weights = Weights(maximum(distances, dims=2)[candidates,1])
+
+        # Obtain the new centroid weighted by the its maximum distances
+        push!(centroids, sample(candidates, weights))
+    end
+
+    # Step 4: Initialize each cluster's parameters based on MAP estimation
+
+    # TODO: Current ordering is assumed to be arbitrary, which is only true if
+    # all F_j and G_j are the same. When it isn't adjust all k models for all k
+    # centroids and pick the highest likelihood candidate for each model.
+
+    for j = 1:k
+        obs = [Y[t,index_map[centroids[j]]] for t = 1:T]
+        θ_est = estimate(obs, F_specs[j], G_specs[j], 0.7)[1]
+        θ[j] = collect(hcat(θ_est...)')
+    end
+
+    # Step 5: Compute weights
+
+    η = compute_weights(model, Y, F_specs, G_specs, θ, ϕ)
+
+    return θ, ϕ, η
 end
